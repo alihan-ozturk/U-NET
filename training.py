@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.transforms.functional as TF
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 import cv2
@@ -28,11 +29,11 @@ IMAGE_DIR = r"C:\Users\RoboGor\Desktop\seg\img"
 MASK_DIR = r"C:\Users\RoboGor\Desktop\seg\mask"
 
 LEARNING_RATE = 0.001
-EPOCHS = 50
-BATCH_SIZE = 4
+EPOCHS = 80
+BATCH_SIZE = 5
 # A.RandomBrightnessContrast(p=0.2),
 augmentations = A.Compose([
-    A.RandomCrop(width=800, height=800),
+    A.RandomCrop(width=900, height=900),
     A.RandomBrightnessContrast(p=0.2),
     A.HorizontalFlip(p=0.5),
     A.VerticalFlip(p=0.5),
@@ -77,6 +78,7 @@ train_data, test_data = random_split(data, [train_size, data_size - train_size])
 
 train_dataloader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True)
 test_dataloader = DataLoader(test_data, batch_size=BATCH_SIZE, shuffle=False)
+
 
 
 class ConvBatchNormReLU(nn.Module):
@@ -146,7 +148,7 @@ class UNet(nn.Module):
             x = self.conv[index](x)
             if x.shape != copies[index].shape:
                 _, _, height, width = x.shape
-                croppedCopy = F.center_crop(copies[index], output_size=(height, width))
+                croppedCopy = TF.resize(copies[index], size=(height, width))
                 x = torch.cat((croppedCopy, x), dim=1)
             else:
                 x = torch.cat((copies[index], x), dim=1)
@@ -175,14 +177,28 @@ writer = SummaryWriter()
 
 for epoch in range(EPOCHS):
     model.train()
+    loss_train = 0
+    loss_test = 0
+
     for i, (images, masks) in enumerate(train_dataloader):
-        print("{}.epoch,  {}.iteration".format(epoch, i))
         optimizer.zero_grad()
         outputs = model(images.to(device))
         masks = masks.unsqueeze(1).to(device)
         loss = criterion(outputs, masks)
+        loss_train += loss.item()
         loss.backward()
         optimizer.step()
+    print("TRAIN {}.epoch, loss : {}".format(epoch+1, loss_train/(i+1)))
+
+    model.eval()
+    for j, (images, masks) in enumerate(test_dataloader):
+        with torch.no_grad():
+            outputs = model(images.to(device))
+
+        masks = masks.unsqueeze(1).to(device)
+        loss = criterion(outputs, masks)
+        loss_test += loss.item()
+    print("TEST {}.epoch, loss : {}".format(epoch+1, loss_test/(j+1)))
 
 model.eval()
 for i, (images, masks) in enumerate(test_dataloader):
