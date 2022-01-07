@@ -1,5 +1,8 @@
 import gc
 import os
+import sys
+
+import matplotlib.pyplot as plt
 import torch
 import warnings
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -9,8 +12,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-import time
-from sklearn.metrics import f1_score, jaccard_score
 import cv2
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
@@ -23,18 +24,18 @@ print(device_name)
 
 warnings.filterwarnings('ignore')
 
-TRAIN_IMAGE_DIR = r"C:\Users\RoboGor\Desktop\train_seg\img"
-TRAIN_MASK_DIR = r"C:\Users\RoboGor\Desktop\train_seg\mask"
-TEST_IMAGE_DIR = r"C:\Users\RoboGor\Desktop\test_seg\img"
-TEST_MASK_DIR = r"C:\Users\RoboGor\Desktop\test_seg\mask"
+IMAGE_DIR = r"C:\Users\RoboGor\Desktop\seg\img"
+MASK_DIR = r"C:\Users\RoboGor\Desktop\seg\mask"
 
 LEARNING_RATE = 0.001
-EPOCHS = 30
-BATCH_SIZE = 3
+EPOCHS = 50
+BATCH_SIZE = 4
 # A.RandomBrightnessContrast(p=0.2),
 augmentations = A.Compose([
     A.RandomCrop(width=800, height=800),
+    A.RandomBrightnessContrast(p=0.2),
     A.HorizontalFlip(p=0.5),
+    A.VerticalFlip(p=0.5),
     A.Resize(400, 400),
     ToTensorV2()
 ])
@@ -54,7 +55,7 @@ class aerialDataset(Dataset):
     def __getitem__(self, idx):
         img_path = os.path.join(self.img_path, self.img_names[idx])
         mask_path = os.path.join(self.mask_path, self.mask_names[idx])
-        image = np.array(Image.open(img_path).convert("RGB"))
+        image = np.array(Image.open(img_path))
         mask = np.array(Image.open(mask_path).convert("L"), dtype=np.float32)
         mask[mask == 255.0] = 1.0
 
@@ -68,17 +69,14 @@ class aerialDataset(Dataset):
         return image, mask
 
 
-train_val = aerialDataset(TRAIN_IMAGE_DIR, TRAIN_MASK_DIR, transform=augmentations)
-test_set = aerialDataset(TEST_IMAGE_DIR, TEST_MASK_DIR, transform=augmentations)
+data = aerialDataset(IMAGE_DIR, MASK_DIR, transform=augmentations)
 
-train_val_size = len(train_val)
-train_set_len = int(train_val_size * 0.8)
-train_set, val_set = random_split(train_val, [train_set_len, train_val_size - train_set_len],
-                                  generator=torch.Generator().manual_seed(1))
+data_size = len(data)
+train_size = int(data_size * 0.8)
+train_data, test_data = random_split(data, [train_size, data_size - train_size])
 
-train_dataloader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
-val_dataloader = DataLoader(val_set, batch_size=BATCH_SIZE, shuffle=False)
-test_dataloader = DataLoader(test_set, batch_size=BATCH_SIZE, shuffle=False)
+train_dataloader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True)
+test_dataloader = DataLoader(test_data, batch_size=BATCH_SIZE, shuffle=False)
 
 
 class ConvBatchNormReLU(nn.Module):
@@ -120,7 +118,6 @@ class UNet(nn.Module):
 
         # doubleConv-up
         for numberOfFeatures in reversed(copySizes):
-            # TODO ALTERNATİF OLARAK UPSAMPLING'DE DE PARAMETRE ÖĞRENMESİ İSTENİRSE BİR ALT SATIRA EKLENECEK LAYER: CONVTRANSPOSE2D. BU KULLANIMDA UPSAMPLING FORWARD'DA KALDIRILACAK
             self.upConv.append(nn.Sequential(
                 ConvBatchNormReLU(numberOfFeatures * poolKernel, numberOfFeatures),
                 ConvBatchNormReLU(numberOfFeatures, numberOfFeatures)
@@ -168,117 +165,50 @@ optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
 writer = SummaryWriter()
 
+# def pixel_accuracy(output, mask):
+#     with torch.no_grad():
+#         # output = torch.argmax(F.softmax(output, dim=1), dim=1)
+#         correct = torch.eq(output, mask).int()
+#         accuracy = float(correct.sum()) / float(correct.numel())
+#     return accuracy
 
-def pixel_accuracy(output, mask):
-    with torch.no_grad():
-        # output = torch.argmax(F.softmax(output, dim=1), dim=1)
-        correct = torch.eq(output, mask).int()
-        accuracy = float(correct.sum()) / float(correct.numel())
-    return accuracy
 
-
-train_val_time = 0
 for epoch in range(EPOCHS):
-    start = time.time() / 60
-    tr_loss = 0
-    tr_iou = 0
-    tr_acc = 0
-    tr_f1 = 0
-    tr_dice = 0
-    print(f"Epoch: {epoch}")
-    if epoch % 5 == 0:
-        print('Saving state dictionary...')
-        torch.save(model.state_dict(), 'UNet-ForestDataset_06_01_Checkpoint' + str(epoch) + '.pth')
     model.train()
     for i, (images, masks) in enumerate(train_dataloader):
-        print(f"batch: {i}")
+        print("{}.epoch,  {}.iteration".format(epoch, i))
         optimizer.zero_grad()
         outputs = model(images.to(device))
-        masks = masks.float().unsqueeze(1).to(device)
+        masks = masks.unsqueeze(1).to(device)
         loss = criterion(outputs, masks)
         loss.backward()
         optimizer.step()
-        outputs[outputs >= 0.5] = 1.0
-        outputs[outputs < 0.5] = 0.0
-        # tr_acc += pixel_accuracy(outputs, masks)
-        # tr_f1 += f1_score(masks.detach().cpu().contiguous().view(-1), outputs.detach().cpu().contiguous().view(-1),
-        #                   average='binary')
-        # tr_dice += dice_score(outputs, masks)
-        # optimizer.zero_grad()
-
-        # tr_loss += loss.item()
-        # # tr_iou += mIoU(outputs, masks)
-        # tr_iou += jaccard_score(masks.detach().cpu().contiguous().view(-1),
-        #                         outputs.detach().cpu().contiguous().view(-1))
-
-    # print(f"Training Loss: {loss/len(train_dataloader)}    Training Accuracy: {acc}")
-    # print(f"Training Loss: {tr_loss/len(train_dataloader)}  Training Accuracy: {tr_acc/len(train_dataloader)}
-    # Training mIoU: {tr_iou/len(train_dataloader)}   Training F1: {tr_f1/len(train_dataloader)}
-    # Training Dice: {tr_dice/len(train_dataloader)}")
-    # print(
-    #     f"Training Loss: {tr_loss / len(train_dataloader)}  Training Accuracy: {tr_acc / len(train_dataloader)}
-    #     Training mIoU: {tr_iou / len(train_dataloader)}   Training F1: {tr_f1 / len(train_dataloader)}")
-
-    model.eval()
-    # val_loss = 0
-    # val_acc = 0
-    # val_iou = 0
-    # val_f1 = 0
-    # val_dice = 0
-    for i, (images, masks) in enumerate(val_dataloader):
-        with torch.no_grad():
-            outputs = model(images.to(device))
-
-        masks = masks.float().unsqueeze(1).to(device)
-        loss = criterion(outputs, masks)
-        outputs[outputs >= 0.5] = 1.0
-        outputs[outputs < 0.5] = 0.0
-
-
-    train_val_time_epoch = time.time() / 60 - start
-    print(f'Elapsed time: {train_val_time_epoch} minutes')
-    train_val_time += train_val_time_epoch
-
-print(f'Training completed. Elapsed time: {train_val_time} minutes')
-print('Saving state dictionary...')
-torch.save(model.state_dict(), 'UNet-ForestDataset_06_01_final.pth')
-print('Save successful. Entering test phase...')
 
 model.eval()
-test_loss = 0
-test_acc = 0
-test_iou = 0
-test_f1 = 0
-test_dice = 0
-x = 0
 for i, (images, masks) in enumerate(test_dataloader):
-
-    # optimizer.zero_grad()
     with torch.no_grad():
         outputs = model(images.to(device))
 
-    masks = masks.float().unsqueeze(1).to(device)
-    masks[masks >= 0.5] = 1.0
-    masks[masks < 0.5] = 0.0
+    masks = masks.unsqueeze(1).to(device)
     loss = criterion(outputs, masks)
     outputs[outputs >= 0.5] = 1.0
     outputs[outputs < 0.5] = 0.0
-    test_acc += pixel_accuracy(outputs, masks)
-    print(f'acc: {test_acc}')
 
-    image = images[x].cpu().detach().numpy() * 255
-    output = outputs[x].cpu().detach().numpy() * 255
-    mask = masks[x].cpu().detach().numpy() * 255
+    for j in range(3):
 
-    image = np.transpose(image, (1, 2, 0))
-    output = np.transpose(output, (1, 2, 0))
-    mask = np.transpose(mask, (1, 2, 0))
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    # output = cv2.cvtColor(output, cv2.COLOR_BGR2GRAY)
-    # mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
-    cv2.imshow('original image', image.astype('uint8'))
-    cv2.imshow('output', output.astype('uint8'))
-    cv2.imshow('mask', mask.astype('uint8'))
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+        image = images[j] * 255
+        out = outputs[j] * 255
+        mask = masks[j] * 255
+        image = torch.permute(image, (1, 2, 0))
+        out = torch.permute(out, (1, 2, 0))
+        mask = torch.permute(mask, (1, 2, 0))
 
+        image = image.cpu().numpy().astype('uint8')
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        cv2.imshow('original image', image)
+        cv2.imshow('output', out.cpu().numpy().astype('uint8'))
+        cv2.imshow('mask', mask.cpu().numpy().astype('uint8'))
+        key = cv2.waitKey(0)
+        if key == ord("q"):
+            cv2.destroyAllWindows()
+            break
