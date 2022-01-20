@@ -12,7 +12,7 @@ rgbStd = np.array([.0, .0, .0])
 for img_name in os.listdir(path):
     abs_path = os.path.join(path, img_name)
     img = np.array(Image.open(abs_path))
-    rgbM += np.array([img[:, :, i].mean() for i in range(3)])
+    rgbM += np.array([img[:, :, i].mean() for i in range(3)])       # range(3) for RGB dims
     rgbStd += np.array([img[:, :, i].std() for i in range(3)])
 
 print(rgbM / denominator)
