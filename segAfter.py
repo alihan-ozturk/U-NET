@@ -149,9 +149,8 @@ for i, (image, mask) in enumerate(robogor_loader):
             label -= counter
             labels[temp] = label
             d[label] = temSum
-    # action = np.argmax([actionSum for actionSum in func(labels, d)]
     actions = np.array([actionSum for actionSum in func(labels, d)])
-    if np.sum(actions > 0)==4:
+    if np.sum(actions > 0) == 4:
         action = 4
     else:
         action = np.argmax(actions)
