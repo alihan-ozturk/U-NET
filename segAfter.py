@@ -53,9 +53,9 @@ data = aerialDataset(IMAGE_DIR, MASK_DIR, transform=augmentations)
 robogor_loader = DataLoader(data, batch_size=BATCH_SIZE, shuffle=True)
 
 
-def func(img):
+def func(img, d):
     w, h = img.shape
-
+    midPoint = ((w - 1) / 2, (h - 1) / 2)
     iterW = 4
     iterH = 2
 
@@ -81,10 +81,10 @@ def func(img):
             cell1 = img[cellUp]
             cell2 = img[cellDown]
             if cell1 != 0:
-                upCells.append([cellUp, cell1])
+                upCells.append(func2(midPoint, cellUp, d, cell1))
                 stop = 1
             if cell2 != 0:
-                downCells.append([cellDown, cell2])
+                downCells.append(func2(midPoint, cellDown, d, cell2))
                 stop = 1
 
         for j in range(iterH):
@@ -93,14 +93,14 @@ def func(img):
             cell1 = img[cellLeft]
             cell2 = img[cellRight]
             if cell1 != 0:
-                leftCells.append([cellLeft, cell1])
+                leftCells.append(func2(midPoint, cellLeft, d, cell1))
                 stop = 1
             if cell2 != 0:
-                rightCells.append([cellRight, cell2])
+                rightCells.append(func2(midPoint, cellRight, d, cell2))
                 stop = 1
 
         if stop:
-            return upCells, rightCells, downCells[::-1], leftCells[::-1]
+            return np.sum(upCells), np.sum(rightCells), np.sum(downCells), np.sum(leftCells)
         else:
             if k >= nIncrease:
                 if w < h:
@@ -118,12 +118,19 @@ def func(img):
                 down += 1
                 left -= 1
                 right += 1
-    return [], [], [], []
+    return 0, 0, 0, 0
+
+
+def func2(homePoint, targetPoint, d, label):
+    x, y = homePoint
+    x_, y_ = targetPoint
+    dist = (x - x_) ** 2 + (y - y_) ** 2
+    return d[label] / dist
 
 
 size = (40, 40)
 area = size[0] * size[1]
-
+actionSpaces = {0: "up", 1: "right", 2: "down", 3: "left", 4: "land"}
 kernel = np.ones(size)
 
 for i, (image, mask) in enumerate(robogor_loader):
@@ -142,10 +149,13 @@ for i, (image, mask) in enumerate(robogor_loader):
             label -= counter
             labels[temp] = label
             d[label] = temSum
-    for direction in func(labels):
-        print(direction)
-    # todo
-    # for döngüsünde yönler incelenip hareket edilecek
+    # action = np.argmax([actionSum for actionSum in func(labels, d)]
+    actions = np.array([actionSum for actionSum in func(labels, d)])
+    if np.sum(actions > 0)==4:
+        action = 4
+    else:
+        action = np.argmax(actions)
+    print(actionSpaces[action])
     mask[180:-180, 180:-180] = 0
     plt.imshow(np.concatenate((mask / 255, labels), axis=1), cmap="gray")
     plt.show()
