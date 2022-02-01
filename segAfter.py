@@ -1,3 +1,4 @@
+from turtle import up
 import numpy as np
 from cv2 import cv2
 from torch.utils.data import Dataset, DataLoader
@@ -7,8 +8,8 @@ import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
 import matplotlib.pyplot as plt
 
-IMAGE_DIR = r"C:\Users\RoboGor\Desktop\seg\img"
-MASK_DIR = r"C:\Users\RoboGor\Desktop\seg\inverseImg"
+IMAGE_DIR = "/home/alihan/Desktop/robogor/seg/img"
+MASK_DIR = "/home/alihan/Desktop/robogor/seg/inverseImg"
 
 augmentations = A.Compose([
     A.RandomCrop(width=1000, height=1000),
@@ -53,7 +54,14 @@ data = aerialDataset(IMAGE_DIR, MASK_DIR, transform=augmentations)
 robogor_loader = DataLoader(data, batch_size=BATCH_SIZE, shuffle=True)
 
 
-def func(img, d):
+
+def DistancesLandingStates(homePoint, targetPoint, d, label):
+    x, y = homePoint
+    x_, y_ = targetPoint
+    dist = (x - x_) ** 2 + (y - y_) ** 2
+    return d[label] / dist
+
+def NearestLandingStates(img, d):
     w, h = img.shape
     midPoint = ((w - 1) / 2, (h - 1) / 2)
     iterW = 4
@@ -81,10 +89,10 @@ def func(img, d):
             cell1 = img[cellUp]
             cell2 = img[cellDown]
             if cell1 != 0:
-                upCells.append(func2(midPoint, cellUp, d, cell1))
+                upCells.append(DistancesLandingStates(midPoint, cellUp, d, cell1))
                 stop = 1
             if cell2 != 0:
-                downCells.append(func2(midPoint, cellDown, d, cell2))
+                downCells.append(DistancesLandingStates(midPoint, cellDown, d, cell2))
                 stop = 1
 
         for j in range(iterH):
@@ -93,10 +101,10 @@ def func(img, d):
             cell1 = img[cellLeft]
             cell2 = img[cellRight]
             if cell1 != 0:
-                leftCells.append(func2(midPoint, cellLeft, d, cell1))
+                leftCells.append(DistancesLandingStates(midPoint, cellLeft, d, cell1))
                 stop = 1
             if cell2 != 0:
-                rightCells.append(func2(midPoint, cellRight, d, cell2))
+                rightCells.append(DistancesLandingStates(midPoint, cellRight, d, cell2))
                 stop = 1
 
         if stop:
@@ -121,21 +129,13 @@ def func(img, d):
     return 0, 0, 0, 0
 
 
-def func2(homePoint, targetPoint, d, label):
-    x, y = homePoint
-    x_, y_ = targetPoint
-    dist = (x - x_) ** 2 + (y - y_) ** 2
-    return d[label] / dist
-
-
 size = (40, 40)
 area = size[0] * size[1]
-actionSpaces = {0: "up", 1: "right", 2: "down", 3: "left", 4: "land"}
+actionSpaces = {0: "forward", 1: "right", 2: "back", 3: "left", 4: "land", 5:" up"}
 kernel = np.ones(size)
 
-for i, (image, mask) in enumerate(robogor_loader):
+def DesicionFunction(img):
     d = dict()
-    mask = mask[0].cpu().numpy()
     new = cv2.erode(mask, kernel)
     num_labels, labels = cv2.connectedComponents(new)
     counter = 0
@@ -149,13 +149,23 @@ for i, (image, mask) in enumerate(robogor_loader):
             label -= counter
             labels[temp] = label
             d[label] = temSum
-    actions = np.array([actionSum for actionSum in func(labels, d)])
-    if np.sum(actions > 0) == 4:
+    actions = np.array([actionSum for actionSum in NearestLandingStates(labels, d)])
+    return actions
+
+
+upCount = 0
+for image, mask in robogor_loader:
+    mask = mask[0].cpu().numpy()
+    actions = DesicionFunction(mask)
+    possibleActionSize = np.sum(actions>0)
+    if possibleActionSize == q0:
+        upCount += 1
+        action = 5
+    elif possibleActionSize == 4:
         action = 4
     else:
         action = np.argmax(actions)
-    print(actionSpaces[action])
-    mask[180:-180, 180:-180] = 0
-    plt.imshow(np.concatenate((mask / 255, labels), axis=1), cmap="gray")
+    print(actionSpaces[action], upCount)
+    plt.imshow(mask, cmap="gray")
     plt.show()
-    input("bas")
+
