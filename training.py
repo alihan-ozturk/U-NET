@@ -12,7 +12,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
 import cv2
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
@@ -25,8 +24,8 @@ print(device_name)
 
 warnings.filterwarnings('ignore')
 
-IMAGE_DIR = r"C:\Users\RoboGor\Desktop\seg\img"
-MASK_DIR = r"C:\Users\RoboGor\Desktop\seg\mask"
+IMAGE_DIR = r"C:\Users\Alihan\PycharmProjects\pythonProject\seg\img"
+MASK_DIR = r"C:\Users\Alihan\PycharmProjects\pythonProject\seg\inverseImg"
 
 LEARNING_RATE = 0.001
 EPOCHS = 80
@@ -37,7 +36,7 @@ augmentations = A.Compose([
     A.RandomBrightnessContrast(p=0.2),
     A.HorizontalFlip(p=0.5),
     A.VerticalFlip(p=0.5),
-    A.Resize(400, 400),
+    A.Resize(320, 320),
     ToTensorV2()
 ])
 
@@ -85,7 +84,7 @@ class ConvBatchNormReLU(nn.Module):
     def __init__(self, in_channels, out_channels, kernel=3, stride=1, padding=1, bias=False, reluInplace=True):
         super(ConvBatchNormReLU, self).__init__()
         self.seqLayers = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=kernel, stride=stride, padding=padding, bias=bias),
+            nn.Conv2d(in_channels,  out_channels, kernel_size=kernel, stride=stride, padding=padding, bias=bias),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=reluInplace)
         )
@@ -165,14 +164,12 @@ model = UNet(in_channels=3, out_channels=1).to(device)
 criterion = nn.BCELoss()
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-writer = SummaryWriter()
 
-# def pixel_accuracy(output, mask):
-#     with torch.no_grad():
-#         # output = torch.argmax(F.softmax(output, dim=1), dim=1)
-#         correct = torch.eq(output, mask).int()
-#         accuracy = float(correct.sum()) / float(correct.numel())
-#     return accuracy
+def acc(output, target):
+    with torch.no_grad():
+        predicted = torch.round(output)
+        eq = torch.eq(predicted, target).int()
+        return eq.sum() / eq.numel()
 
 
 for epoch in range(EPOCHS):
@@ -188,7 +185,7 @@ for epoch in range(EPOCHS):
         loss_train += loss.item()
         loss.backward()
         optimizer.step()
-    print("TRAIN {}.epoch, loss : {}".format(epoch+1, loss_train/(i+1)))
+    print("TRAIN {}.epoch, loss : {}, acc : {}".format(epoch+1, loss_train/(i+1), acc(outputs, masks)))
 
     model.eval()
     for j, (images, masks) in enumerate(test_dataloader):
@@ -198,7 +195,9 @@ for epoch in range(EPOCHS):
         masks = masks.unsqueeze(1).to(device)
         loss = criterion(outputs, masks)
         loss_test += loss.item()
-    print("TEST {}.epoch, loss : {}".format(epoch+1, loss_test/(j+1)))
+    print("TEST {}.epoch, loss : {}, acc : {}".format(epoch+1, loss_test/(j+1), acc(outputs, masks)))
+
+torch.save(model.state_dict(), "final.pth")
 
 model.eval()
 for i, (images, masks) in enumerate(test_dataloader):
@@ -209,6 +208,7 @@ for i, (images, masks) in enumerate(test_dataloader):
     loss = criterion(outputs, masks)
     outputs[outputs >= 0.5] = 1.0
     outputs[outputs < 0.5] = 0.0
+    print("acc : {}".format(acc(outputs, masks)))
 
     for j in range(3):
 
